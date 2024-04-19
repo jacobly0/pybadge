@@ -2,60 +2,51 @@ pub const TFT_RST: Port = .{ .group = .A, .pin = 0 };
 pub const TFT_LITE: Port = .{ .group = .A, .pin = 1 };
 pub const A0: Port = .{ .group = .A, .pin = 2 };
 pub const AVCC: Port = .{ .group = .A, .pin = 3 };
-pub const A4: Port = .{ .group = .A, .pin = 4 };
-pub const A1: Port = .{ .group = .A, .pin = 5 };
-pub const A5: Port = .{ .group = .A, .pin = 6 };
-pub const @"+3V3": Port = .{ .Group = .A, .pin = 7 };
+pub const A6_VMEAS: Port = .{ .group = .A, .pin = 4 };
+pub const D13: Port = .{ .group = .A, .pin = 5 };
+pub const A7_LIGHT: Port = .{ .group = .A, .pin = 6 };
+pub const @"+3V3": Port = .{ .group = .A, .pin = 7 };
 pub const QSPI_DATA: [4]Port = .{
     .{ .group = .A, .pin = 8 },
     .{ .group = .A, .pin = 9 },
     .{ .group = .A, .pin = 10 },
     .{ .group = .A, .pin = 11 },
 };
-pub const SDA_3V: Port = .{ .group = .A, .pin = 12 };
-pub const SCL_3V: Port = .{ .group = .A, .pin = 13 };
-pub const D4: Port = .{ .group = .A, .pin = 14 };
+// PA12-PA14 not connected
 pub const D8_NEOPIX: Port = .{ .group = .A, .pin = 15 };
-pub const D5: Port = .{ .group = .A, .pin = 16 };
-pub const SCK: Port = .{ .group = .A, .pin = 17 };
-pub const D6: Port = .{ .group = .A, .pin = 18 };
-pub const D9: Port = .{ .group = .A, .pin = 19 };
-pub const D10: Port = .{ .group = .A, .pin = 20 };
-pub const D11: Port = .{ .group = .A, .pin = 21 };
-pub const D12: Port = .{ .group = .A, .pin = 22 };
-pub const D13: Port = .{ .group = .A, .pin = 23 };
-pub const @"D-": Port = .{ .group = .A, .pin = 24 };
-pub const @"D+": Port = .{ .group = .A, .pin = 25 };
+// PA16-PA22 not connected
+pub const SPKR_EN: Port = .{ .group = .A, .pin = 23 };
+pub const @"D+": Port = .{ .group = .A, .pin = 24 };
+pub const @"D-": Port = .{ .group = .A, .pin = 25 };
 // PA26 not present
-pub const SPKR_EN: Port = .{ .group = .A, .pin = 27 };
+pub const SWO: Port = .{ .group = .A, .pin = 27 };
 // PA28-PA29 not present
 pub const SWCLK: Port = .{ .group = .A, .pin = 30 };
 pub const SWDIO: Port = .{ .group = .A, .pin = 31 };
 
-pub const BUTTON_LATCH: Port = .{ .group = .B, .pin = 0 };
-pub const A6_VMEAS: Port = .{ .group = .B, .pin = 1 };
-pub const D3_A9: Port = .{ .group = .B, .pin = 2 };
-pub const D2_A8: Port = .{ .group = .B, .pin = 3 };
-pub const A7_LIGHT: Port = .{ .group = .B, .pin = 4 };
-pub const TFT_DC: Port = .{ .group = .B, .pin = 5 };
-// PB06 not connected
-pub const TFT_CS: Port = .{ .group = .B, .pin = 7 };
-pub const A2: Port = .{ .group = .B, .pin = 8 };
-pub const A3: Port = .{ .group = .B, .pin = 9 };
+pub const BUTTON: [9]Port = .{
+    .{ .group = .B, .pin = 0 },
+    .{ .group = .B, .pin = 1 },
+    .{ .group = .B, .pin = 2 },
+    .{ .group = .B, .pin = 3 },
+    .{ .group = .B, .pin = 4 },
+    .{ .group = .B, .pin = 5 },
+    .{ .group = .B, .pin = 6 },
+    .{ .group = .B, .pin = 7 },
+    .{ .group = .B, .pin = 8 },
+};
+// PB09 not connected
 pub const QSPI_SCK: Port = .{ .group = .B, .pin = 10 };
 pub const QSPI_CS: Port = .{ .group = .B, .pin = 11 };
-// PB12 not connected
+pub const TFT_DC: Port = .{ .group = .B, .pin = 12 };
 pub const TFT_SCK: Port = .{ .group = .B, .pin = 13 };
-pub const D7_LISIRQ: Port = .{ .group = .B, .pin = 14 };
+pub const TFT_CS: Port = .{ .group = .B, .pin = 14 };
 pub const TFT_MOSI: Port = .{ .group = .B, .pin = 15 };
-pub const TX: Port = .{ .group = .B, .pin = 16 };
-pub const RX: Port = .{ .group = .B, .pin = 17 };
+// PB16-PB17 not connected
 // PB18-PB21 not present
-pub const MISO: Port = .{ .group = .B, .pin = 22 };
-pub const MOSI: Port = .{ .group = .B, .pin = 23 };
+// PB22-PB23 not connected
 // PB24-PB29 not present
-pub const BUTTON_OUT: Port = .{ .group = .B, .pin = 30 };
-pub const BUTTON_CLK: Port = .{ .group = .B, .pin = 31 };
+// PB30-PB31 not connected
 
 group: Group,
 pin: u5,

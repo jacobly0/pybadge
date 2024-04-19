@@ -111,7 +111,7 @@ pub const microzig_options = .{
                 fn SVCall() callconv(.Naked) void {
                     asm volatile (
                         \\ mvns r0, lr, lsl #31 - 2
-                        \\ bcc 1f
+                        \\ bcc 13f
                         \\ ite mi
                         \\ movmi r1, sp
                         \\ mrspl r1, psp
@@ -119,15 +119,14 @@ pub const microzig_options = .{
                         \\ subs r2, #2
                         \\ ldrb r3, [r2, #1 * 1]
                         \\ cmp r3, #0xDF
-                        \\ bne 1f
+                        \\ bne 13f
                         \\ ldrb r3, [r2, #0 * 1]
                         \\ cmp r3, #12
-                        \\ bhi 1f
+                        \\ bhi 13f
                         \\ tbb [pc, r3]
                         \\0:
                         \\ .byte (0f - 0b) / 2
-                        \\ .byte (9f - 0b) / 2
-                        \\ .byte (9f - 0b) / 2
+                        \\ .byte (1f - 0b) / 2
                         \\ .byte (2f - 0b) / 2
                         \\ .byte (3f - 0b) / 2
                         \\ .byte (4f - 0b) / 2
@@ -135,42 +134,50 @@ pub const microzig_options = .{
                         \\ .byte (6f - 0b) / 2
                         \\ .byte (7f - 0b) / 2
                         \\ .byte (8f - 0b) / 2
-                        \\ .byte (8f - 0b) / 2
+                        \\ .byte (9f - 0b) / 2
                         \\ .byte (10f - 0b) / 2
-                        \\1:
                         \\ .byte (11f - 0b) / 2
+                        \\13:
+                        \\ .byte (12f - 0b) / 2
                         \\ .byte 0xDE
                         \\ .align 1
                         \\0:
                         \\ ldm r1, {r0-r3}
                         \\ b %[blit:P]
+                        \\1:
+                        \\ ldm r1, {r0-r3}
+                        \\ b %[blit_sub:P]
                         \\2:
                         \\ ldm r1, {r0-r3}
-                        \\ b %[oval:P]
+                        \\ b %[line:P]
                         \\3:
                         \\ ldm r1, {r0-r3}
-                        \\ b %[rect:P]
+                        \\ b %[oval:P]
                         \\4:
                         \\ ldm r1, {r0-r3}
-                        \\ b %[text:P]
+                        \\ b %[rect:P]
                         \\5:
-                        \\ ldm r1, {r0-r2}
-                        \\ b %[vline:P]
+                        \\ ldm r1, {r0-r3}
+                        \\ b %[text:P]
                         \\6:
-                        \\ ldm r1, {r0-r2}
-                        \\ b %[hline:P]
+                        \\ ldm r1, {r0-r3}
+                        \\ b %[vline:P]
                         \\7:
                         \\ ldm r1, {r0-r3}
-                        \\ b %[tone:P]
+                        \\ b %[hline:P]
                         \\8:
-                        \\ movs r0, #0
-                        \\ str r0, [r1, #0 * 4]
+                        \\ ldm r1, {r0-r3}
+                        \\ b %[tone:P]
                         \\9:
-                        \\ bx lr
+                        \\ ldm r1, {r0-r1}
+                        \\ b %[read_flash:P]
                         \\10:
                         \\ ldm r1, {r0-r1}
-                        \\ b %[trace:P]
+                        \\ b %[write_flash_page:P]
                         \\11:
+                        \\ ldm r1, {r0-r1}
+                        \\ b %[trace:P]
+                        \\12:
                         \\ lsrs r0, #31
                         \\ msr control, r0
                         \\ it eq
@@ -188,12 +195,16 @@ pub const microzig_options = .{
                         \\ bx r0
                         :
                         : [blit] "X" (&cart.blit),
+                          [blit_sub] "X" (&cart.blit_sub),
+                          [line] "X" (&cart.line),
                           [oval] "X" (&cart.oval),
                           [rect] "X" (&cart.rect),
                           [text] "X" (&cart.text),
                           [vline] "X" (&cart.vline),
                           [hline] "X" (&cart.hline),
                           [tone] "X" (&cart.tone),
+                          [read_flash] "X" (&cart.read_flash),
+                          [write_flash_page] "X" (&cart.write_flash_page),
                           [trace] "X" (&cart.trace),
                     );
                 }
@@ -384,12 +395,17 @@ pub fn main() !void {
 
         input: {
             var input_buffer: [64]u8 = undefined;
-            const data = input_buffer[0 .. in.read(&input_buffer) catch |err| {
-                switch (err) {
-                    error.NoConnection => was_ready = false,
-                }
-                break :input;
-            }];
+            var input_len: usize = 0;
+            const input_final_len = @as(*const volatile usize, &input_len).*;
+            const data = if (input_final_len > 0)
+                @as(*const volatile [64]u8, &input_buffer)[0..input_final_len]
+            else
+                input_buffer[0 .. in.read(&input_buffer) catch |err| {
+                    switch (err) {
+                        error.NoConnection => was_ready = false,
+                    }
+                    break :input;
+                }];
             if (!was_ready) {
                 std.log.info("Ready!", .{});
                 cart.start();

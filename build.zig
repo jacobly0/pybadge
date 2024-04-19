@@ -2,73 +2,75 @@ const std = @import("std");
 const Build = std.Build;
 
 const MicroZig = @import("microzig/build");
+const MemoryRegion = @typeInfo(std.meta.FieldType(MicroZig.Chip, .memory_regions)).Pointer.child;
 const atsam = @import("microzig/bsp/microchip/atsam");
 
-pub const py_badge: MicroZig.Target = .{
-    .preferred_format = .elf,
-    .chip = atsam.chips.atsamd51j19,
-    .hal = null,
-};
-
-pub const sycl_badge_2024 = MicroZig.Target{
-    .preferred_format = .elf,
-    .chip = atsam.chips.atsamd51j19.chip,
-    .hal = .{
-        .root_source_file = .{ .cwd_relative = "src/hal.zig" },
-    },
-    .board = .{
-        .name = "SYCL Badge 2024",
-        .root_source_file = .{ .cwd_relative = "src/board.zig" },
-    },
-};
+pub fn getTarget(root: anytype) MicroZig.Target {
+    return .{
+        .preferred_format = .elf,
+        .chip = atsam.chips.atsamd51j19.chip,
+        .hal = .{
+            .root_source_file = root.path("src/hal.zig"),
+        },
+        .board = .{
+            .name = "SYCL Badge 2024",
+            .root_source_file = root.path("src/board.zig"),
+        },
+    };
+}
 
 pub fn build(b: *Build) void {
+    const sycl_badge_2024 = getTarget(b);
+
     const mz = MicroZig.init(b, .{});
 
     const optimize = b.standardOptimizeOption(.{});
 
-    _ = b.addModule("wasm4", .{ .root_source_file = .{ .path = "src/wasm4.zig" } });
+    _ = b.addModule("wasm4", .{ .root_source_file = b.path("src/wasm4.zig") });
 
     var dep: std.Build.Dependency = .{ .builder = b };
     const cart = add_cart(&dep, b, .{
         .name = "sample",
         .optimize = optimize,
-        .root_source_file = .{ .path = "samples/feature_test.zig" },
+        .root_source_file = b.path("samples/feature_test.zig"),
     });
 
     const watch_step = b.step("watch", "");
     watch_step.dependOn(&cart.watch_run_cmd.step);
 
-    //const modified_memory_regions = b.allocator.dupe(MicroZig.MemoryRegion, py_badge.chip.memory_regions) catch @panic("out of memory");
-    //for (modified_memory_regions) |*memory_region| {
-    //    if (memory_region.kind != .ram) continue;
-    //    memory_region.offset += 0x19A0;
-    //    memory_region.length -= 0x19A0;
-    //    break;
-    //}
-    //var modified_py_badge = py_badge;
-    //modified_py_badge.chip.memory_regions = modified_memory_regions;
+    const modified_memory_regions = b.allocator.dupe(MemoryRegion, sycl_badge_2024.chip.memory_regions) catch @panic("out of memory");
+    for (modified_memory_regions) |*memory_region| {
+        if (memory_region.kind != .ram) continue;
+        memory_region.offset += 0x19A0;
+        memory_region.length -= 0x19A0;
+        break;
+    }
+    var modified_sycl_badge_2024 = sycl_badge_2024;
+    modified_sycl_badge_2024.chip.memory_regions = modified_memory_regions;
 
-    //const fw = mz.add_firmware(b, .{
-    //    .name = "pybadge-io",
-    //    .target = modified_py_badge,
-    //    .optimize = optimize,
-    //    .source_file = .{ .path = "src/main.zig" },
-    //});
-    //fw.artifact.step.dependOn(&fw_options.step);
-    //fw.modules.app.addImport("options", fw_options.createModule());x
-    //mz.install_firmware(b, fw, .{});
-    //mz.install_firmware(b, fw, .{ .format = .{ .uf2 = .SAMD51 } });
+    const fw_options = b.addOptions();
+    fw_options.addOption(bool, "have_cart", false);
+
+    const fw = mz.add_firmware(b, .{
+        .name = "badge-io",
+        .target = modified_sycl_badge_2024,
+        .optimize = optimize,
+        .root_source_file = b.path("src/main.zig"),
+    });
+    fw.artifact.step.dependOn(&fw_options.step);
+    fw.add_app_import("options", fw_options.createModule(), .{});
+    mz.install_firmware(b, fw, .{});
+    mz.install_firmware(b, fw, .{ .format = .{ .uf2 = .SAMD51 } });
 
     const badge = mz.add_firmware(b, .{
         .name = "badge",
         .target = sycl_badge_2024,
         .optimize = optimize,
-        .root_source_file = .{ .path = "src/badge.zig" },
+        .root_source_file = b.path("src/badge.zig"),
     });
     mz.install_firmware(b, badge, .{});
 
-    inline for (.{
+    for ([_][]const u8{
         "blinky",
         "blinky_timer",
         "usb_cdc",
@@ -81,10 +83,10 @@ pub fn build(b: *Build) void {
         "qspi",
     }) |name| {
         const mvp = mz.add_firmware(b, .{
-            .name = std.fmt.comptimePrint("badge.demo.{s}", .{name}),
+            .name = b.fmt("badge.demo.{s}", .{name}),
             .target = sycl_badge_2024,
             .optimize = optimize,
-            .root_source_file = .{ .path = std.fmt.comptimePrint("src/badge/demos/{s}.zig", .{name}) },
+            .root_source_file = b.path(b.fmt("src/badge/demos/{s}.zig", .{name})),
         });
         mz.install_firmware(b, mvp, .{});
     }
@@ -109,8 +111,8 @@ pub fn build(b: *Build) void {
 }
 
 pub const Cart = struct {
-    // mz: *MicroZig,
-    // fw: *MicroZig.Firmware,
+    mz: *MicroZig,
+    fw: *MicroZig.Firmware,
 
     watch_run_cmd: *std.Build.Step.Run,
 };
@@ -126,7 +128,7 @@ pub fn add_cart(
     b: *Build,
     options: CartOptions,
 ) *Cart {
-    const lib = b.addExecutable(.{
+    const wasm_lib = b.addExecutable(.{
         .name = "cart",
         .root_source_file = options.root_source_file,
         .target = b.resolveTargetQuery(.{
@@ -135,32 +137,32 @@ pub fn add_cart(
         }),
         .optimize = options.optimize,
     });
-    b.installArtifact(lib);
+    b.installArtifact(wasm_lib);
 
-    lib.entry = .disabled;
-    lib.import_memory = true;
-    lib.initial_memory = 65536;
-    lib.max_memory = 65536;
-    lib.stack_size = 14752;
-    lib.global_base = 160 * 128 * 2 + 0x1e;
+    wasm_lib.entry = .disabled;
+    wasm_lib.import_memory = true;
+    wasm_lib.initial_memory = 65536;
+    wasm_lib.max_memory = 65536;
+    wasm_lib.stack_size = 14752;
+    wasm_lib.global_base = 160 * 128 * 2 + 0x1e;
 
-    lib.rdynamic = true;
+    wasm_lib.rdynamic = true;
 
-    lib.root_module.addImport("wasm4", d.module("wasm4"));
+    wasm_lib.root_module.addImport("wasm4", d.module("wasm4"));
 
-    const watch = d.builder.addExecutable(.{
+    const watch_wasm = d.builder.addExecutable(.{
         .name = "watch",
-        .root_source_file = .{ .path = "src/watch/main.zig" },
+        .root_source_file = d.builder.path("src/watch/main.zig"),
         .target = b.resolveTargetQuery(.{}),
         .optimize = options.optimize,
     });
-    watch.root_module.addImport("ws", d.builder.dependency("ws", .{}).module("websocket"));
-    watch.root_module.addImport("mime", d.builder.dependency("mime", .{}).module("mime"));
+    watch_wasm.root_module.addImport("ws", d.builder.dependency("ws", .{}).module("websocket"));
+    watch_wasm.root_module.addImport("mime", d.builder.dependency("mime", .{}).module("mime"));
 
-    const watch_run_cmd = b.addRunArtifact(watch);
-    watch_run_cmd.step.dependOn(b.getInstallStep());
+    const watch_wasm_run_cmd = b.addRunArtifact(watch_wasm);
+    watch_wasm_run_cmd.step.dependOn(b.getInstallStep());
 
-    watch_run_cmd.addArgs(&.{
+    watch_wasm_run_cmd.addArgs(&.{
         "serve",
         b.graph.zig_exe,
         "--zig-out-bin-dir",
@@ -169,43 +171,43 @@ pub fn add_cart(
         options.root_source_file.dirname().getPath(b),
     });
 
+    const sycl_badge_2024 = getTarget(d);
+
+    const cart_lib = b.addStaticLibrary(.{
+        .name = "cart",
+        .root_source_file = options.root_source_file,
+        .target = b.resolveTargetQuery(sycl_badge_2024.chip.cpu.target),
+        .optimize = options.optimize,
+        .link_libc = false,
+        .single_threaded = true,
+        .use_llvm = true,
+        .use_lld = true,
+    });
+    cart_lib.root_module.addImport("wasm4", d.module("wasm4"));
+
+    const fw_options = b.addOptions();
+    fw_options.addOption(bool, "have_cart", true);
+
+    const mz = MicroZig.init(d.builder, .{});
+
+    const fw = mz.add_firmware(d.builder, .{
+        .name = options.name,
+        .target = sycl_badge_2024,
+        .optimize = .Debug, // TODO
+        .root_source_file = d.builder.path("src/main.zig"),
+        .linker_script = d.builder.path("src/cart.ld"),
+    });
+    fw.artifact.linkLibrary(cart_lib);
+    fw.artifact.step.dependOn(&fw_options.step);
+    fw.add_app_import("options", fw_options.createModule(), .{});
+
     const cart: *Cart = b.allocator.create(Cart) catch @panic("out of memory");
     cart.* = .{
-        .watch_run_cmd = watch_run_cmd,
+        .mz = mz,
+        .fw = fw,
+        .watch_run_cmd = watch_wasm_run_cmd,
     };
     return cart;
-
-    // const cart_lib = b.addStaticLibrary(.{
-    //     .name = "cart",
-    //     .root_source_file = options.source_file,
-    //     .target = py_badge.chip.cpu.getDescriptor().target,
-    //     .optimize = options.optimize,
-    //     .link_libc = false,
-    //     .single_threaded = true,
-    //     .use_llvm = true,
-    //     .use_lld = true,
-    // });
-    // cart_lib.addModule("wasm4", d.module("wasm4"));
-
-    // const fw_options = b.addOptions();
-    // fw_options.addOption(bool, "have_cart", true);
-
-    // const mz = MicroZig.init(d.builder, "microzig");
-
-    // const fw = mz.addFirmware(d.builder, .{
-    //     .name = options.name,
-    //     .target = py_badge,
-    //     .optimize = .Debug, // TODO
-    //     .source_file = .{ .path = "src/main.zig" },
-    //     .linker_script = .{ .source_file = .{ .path = "src/cart.ld" } },
-    // });
-    // fw.artifact.linkLibrary(cart_lib);
-    // fw.artifact.step.dependOn(&fw_options.step);
-    // fw.modules.app.dependencies.put("options", fw_options.createModule()) catch @panic("out of memory");
-
-    // const cart: *Cart = b.allocator.create(Cart) catch @panic("out of memory");
-    // cart.* = .{ .mz = mz, .fw = fw };
-    // return cart;
 }
 
 pub fn install_cart(b: *Build, cart: *Cart) void {

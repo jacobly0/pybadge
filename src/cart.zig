@@ -1,21 +1,21 @@
+const w4 = @import("wasm4.zig");
 const font = @import("font.zig").font;
 
 pub fn init() void {
     @setCold(true);
 
-    Port.BUTTON_OUT.set_dir(.in);
-    Port.BUTTON_OUT.config_ptr().write(.{
-        .PMUXEN = 0,
-        .INEN = 1,
-        .PULLEN = 0,
-        .reserved6 = 0,
-        .DRVSTR = 0,
-        .padding = 0,
-    });
-    Port.BUTTON_CLK.set_dir(.out);
-    Port.BUTTON_CLK.write(.high);
-    Port.BUTTON_LATCH.set_dir(.out);
-    Port.BUTTON_LATCH.write(.high);
+    for (Port.BUTTON) |button| {
+        button.set_dir(.in);
+        button.set_dir(.in);
+        button.config_ptr().write(.{
+            .PMUXEN = 0,
+            .INEN = 1,
+            .PULLEN = 0,
+            .reserved6 = 0,
+            .DRVSTR = 0,
+            .padding = 0,
+        });
+    }
 
     timer.init_frame_sync();
 
@@ -46,7 +46,6 @@ pub fn init() void {
 pub fn start() void {
     call(if (options.have_cart) &libcart.start else &struct {
         fn start() callconv(.C) void {
-            const w4 = @import("wasm4.zig");
             w4.trace("start");
         }
     }.start);
@@ -55,65 +54,69 @@ pub fn start() void {
 pub fn tick() void {
     if (!timer.check_frame_ready()) return;
 
-    {
-        var gamepad: u8 = 0;
-        timer.delay(1);
-        Port.BUTTON_LATCH.write(.low);
-        timer.delay(1);
-        Port.BUTTON_LATCH.write(.high);
-        for ([8]u8{
-            BUTTON_2,
-            BUTTON_1,
-            1 << 2,
-            1 << 3,
-            BUTTON_RIGHT,
-            BUTTON_DOWN,
-            BUTTON_UP,
-            BUTTON_LEFT,
-        }) |button| {
-            timer.delay(1);
-            switch (Port.BUTTON_OUT.read()) {
-                .low => {},
-                .high => gamepad |= button,
-            }
-            timer.delay(1);
-            Port.BUTTON_CLK.write(.high);
-            timer.delay(2);
-            Port.BUTTON_CLK.write(.low);
-        }
-        timer.delay(1);
-        GAMEPAD1.* = gamepad;
-    }
-    if (SYSTEM_FLAGS.* & SYSTEM_PRESERVE_FRAMEBUFFER == 0) @memset(FRAMEBUFFER, 0b00_00_00_00);
+    @constCast(w4.controls).* = .{
+        .select = switch (Port.BUTTON[0].read()) {
+            .low => true,
+            .high => false,
+        },
+        .start = switch (Port.BUTTON[1].read()) {
+            .low => true,
+            .high => false,
+        },
+        .a = switch (Port.BUTTON[2].read()) {
+            .low => true,
+            .high => false,
+        },
+        .b = switch (Port.BUTTON[3].read()) {
+            .low => true,
+            .high => false,
+        },
+        .left = switch (Port.BUTTON[8].read()) {
+            .low => true,
+            .high => false,
+        },
+        .right = switch (Port.BUTTON[7].read()) {
+            .low => true,
+            .high => false,
+        },
+        .up = switch (Port.BUTTON[4].read()) {
+            .low => true,
+            .high => false,
+        },
+        .down = switch (Port.BUTTON[5].read()) {
+            .low => true,
+            .high => false,
+        },
+        .click = switch (Port.BUTTON[6].read()) {
+            .low => true,
+            .high => false,
+        },
+    };
     call(if (options.have_cart) &libcart.update else &struct {
         fn update() callconv(.C) void {
-            const w4 = @import("wasm4.zig");
             const global = struct {
                 var tick: u8 = 0;
                 var stroke: bool = true;
                 var radius: u32 = 0;
                 var note: usize = 0;
             };
-            w4.PALETTE[0] = 0x000000;
-            w4.PALETTE[1] = 0xFF0000;
-            w4.PALETTE[2] = 0xFFFFFF;
-            w4.DRAW_COLORS.* = if (global.stroke) 0x0032 else 0x0002;
             w4.oval(
+                .{ .red = 0x1f, .green = 0, .blue = 0 },
+                if (global.stroke) .{ .red = 0x1f, .green = 0x3f, .blue = 0x1f } else null,
                 @as(i32, lcd.width / 2) -| @min(global.radius, std.math.maxInt(i32)),
                 @as(i32, lcd.height / 2) -| @min(global.radius, std.math.maxInt(i32)),
                 global.radius * 2,
                 global.radius * 2,
             );
-            w4.DRAW_COLORS.* = 0x0003;
-            for (0..8) |button| {
-                if (w4.GAMEPAD1.* & @as(u8, 1) << @intCast(button) != 0) {
-                    w4.text(
-                        &.{0x80 + @as(u8, @intCast(button))},
-                        20 + @as(u8, @intCast(button)) * 16,
-                        60,
-                    );
-                }
-            }
+            const controls = w4.controls.*;
+            inline for (@typeInfo(w4.Controls).Struct.fields, 0..) |field, button|
+                if (@field(controls, field.name)) w4.text(
+                    .{ .red = 0x1f, .green = 0x3f, .blue = 0x1f },
+                    null,
+                    &.{0x80 + @as(u8, @intCast(button))},
+                    20 + @as(u8, @intCast(button)) * 16,
+                    60,
+                );
             global.tick += 1;
             if (global.tick == 10) {
                 global.tick = 0;
@@ -130,36 +133,27 @@ pub fn tick() void {
                     440, 415, 392, 370, 349, 330, 311, 294, 277, 262, 247, 233,
                     220, 207, 196, 185, 175, 165, 156, 147, 139, 131, 123, 117,
                     110,
-                })[global.note], 10, 50, w4.TONE_PULSE1);
+                })[global.note], 10, 50, .{
+                    .channel = .pulse1,
+                    .duty_cycle = .@"1/8",
+                    .panning = .stereo,
+                });
                 global.note += 1;
                 if (global.note == 37) global.note = 0;
             }
         }
     }.update);
-    var x: u8 = 0;
-    var y: u8 = 0;
-    for (FRAMEBUFFER[0 .. lcd.width * lcd.height * 2 / 8]) |byte| {
-        inline for (.{ 0, 2, 4, 6 }) |shift| {
-            const palette_index: u2 = @truncate(byte >> shift);
-            const color: u24 = @truncate(PALETTE[palette_index]);
-            lcd.fb.bpp24[x][y] = @bitCast(color);
-            x += 1;
-        }
-        if (x == lcd.width) {
-            x = 0;
-            y += 1;
-        }
-    }
-    std.debug.assert(y == lcd.height);
 }
 
-pub fn blit(sprite: [*]const User(u8), x: i32, y: i32, rest: *const extern struct { width: User(u32), height: User(u32), flags: User(u32) }) callconv(.C) void {
+pub fn blit(colors: [*]const User(w4.OptionalDisplayColor), sprite: [*]const User(u8), x: i32, rest: *const extern struct { y: User(i32), width: User(u32), height: User(u32), flags: User(w4.BlitFlags) }) callconv(.C) void {
+    const y = rest.y.load();
     const width = rest.width.load();
     const height = rest.height.load();
     const flags = rest.flags.load();
 
-    switch (flags) {
-        BLIT_1BPP => for (0..height) |sprite_y| {
+    if (flags.flip_x or flags.flip_y or flags.rotate) return;
+    switch (flags.bits_per_pixel) {
+        .one => for (0..height) |sprite_y| {
             for (0..width) |sprite_x| {
                 const sprite_index = sprite_x + width * sprite_y;
                 const draw_color_index: u1 = @truncate(sprite[sprite_index >> 3].load() >>
@@ -167,11 +161,11 @@ pub fn blit(sprite: [*]const User(u8), x: i32, y: i32, rest: *const extern struc
                 clip_draw(
                     x +| @min(sprite_x, std.math.maxInt(i32)),
                     y +| @min(sprite_y, std.math.maxInt(i32)),
-                    draw_color_index,
+                    colors[draw_color_index].load().unwrap(),
                 );
             }
         },
-        BLIT_2BPP => for (0..height) |sprite_y| {
+        .two => for (0..height) |sprite_y| {
             for (0..width) |sprite_x| {
                 const sprite_index = sprite_x + width * sprite_y;
                 const draw_color_index: u2 = @truncate(sprite[sprite_index >> 2].load() >>
@@ -179,29 +173,75 @@ pub fn blit(sprite: [*]const User(u8), x: i32, y: i32, rest: *const extern struc
                 clip_draw(
                     x +| @min(sprite_x, std.math.maxInt(i32)),
                     y +| @min(sprite_y, std.math.maxInt(i32)),
-                    draw_color_index,
+                    colors[draw_color_index].load().unwrap(),
                 );
             }
         },
-        else => {},
     }
 }
 
-pub fn oval(x: i32, y: i32, width: u32, height: u32) callconv(.C) void {
-    if (width == 0 or height == 0 or x >= SCREEN_SIZE or y >= SCREEN_SIZE) return;
+pub fn blit_sub(colors: [*]const User(w4.OptionalDisplayColor), sprite: [*]const User(u8), x: i32, rest: *const extern struct { y: User(i32), width: User(u32), height: User(u32), src_x: User(u32), src_y: User(u32), stride: User(u32), flags: User(w4.BlitFlags) }) callconv(.C) void {
+    const y = rest.y.load();
+    const src_x = rest.src_x.load();
+    const src_y = rest.src_y.load();
+    const stride = rest.stride.load();
+    const width = rest.width.load();
+    const height = rest.height.load();
+    const flags = rest.flags.load();
+
+    if (flags.flip_x or flags.flip_y or flags.rotate) return;
+    switch (flags.bits_per_pixel) {
+        .one => for (0..height) |sprite_y| {
+            for (0..width) |sprite_x| {
+                const sprite_index = (src_x + sprite_x) + stride * (src_y + sprite_y);
+                const draw_color_index: u1 = @truncate(sprite[sprite_index >> 3].load() >>
+                    (7 - @as(u3, @truncate(sprite_index))));
+                clip_draw(
+                    x +| @min(sprite_x, std.math.maxInt(i32)),
+                    y +| @min(sprite_y, std.math.maxInt(i32)),
+                    colors[draw_color_index].load().unwrap(),
+                );
+            }
+        },
+        .two => for (0..height) |sprite_y| {
+            for (0..width) |sprite_x| {
+                const sprite_index = (src_x + sprite_x) + stride * (src_y + sprite_y);
+                const draw_color_index: u2 = @truncate(sprite[sprite_index >> 2].load() >>
+                    (6 - (@as(u3, @as(u2, @truncate(sprite_index))) << 1)));
+                clip_draw(
+                    x +| @min(sprite_x, std.math.maxInt(i32)),
+                    y +| @min(sprite_y, std.math.maxInt(i32)),
+                    colors[draw_color_index].load().unwrap(),
+                );
+            }
+        },
+    }
+}
+
+pub fn line(color: w4.DisplayColor, x1: i32, y1: i32, rest: *const extern struct { x2: User(i32), y2: User(i32) }) void {
+    const x2 = rest.x2.load();
+    const y2 = rest.y2.load();
+
+    _ = color;
+    _ = x1;
+    _ = y1;
+    _ = x2;
+    _ = y2;
+}
+
+pub fn oval(stroke_color: w4.OptionalDisplayColor, fill_color: w4.OptionalDisplayColor, x: i32, rest: *const extern struct { y: User(i32), width: User(u32), height: User(u32) }) callconv(.C) void {
+    const y = rest.y.load();
+    const width = rest.width.load();
+    const height = rest.height.load();
+
+    if (stroke_color == .none and fill_color == .none) return;
+    if (width == 0 or height == 0 or x >= w4.screen_width or y >= w4.screen_height) return;
     const end_x = x +| @min(width, std.math.maxInt(i32));
     const end_y = y +| @min(height, std.math.maxInt(i32));
     if (end_x < 0 or end_y < 0) return;
 
-    const draw_colors = DRAW_COLORS.*;
-    const fill_draw_color: u4 = @truncate(draw_colors >> 0);
-    const stroke_draw_color: u4 = @truncate(draw_colors >> 4);
-    if (fill_draw_color == 0 and stroke_draw_color == 0) return;
-    const fill_palette_index: ?u2 = if (fill_draw_color == 0) null else @truncate(fill_draw_color - 1);
-    const stroke_palette_index: ?u2 = if (stroke_draw_color == 0) fill_palette_index else @truncate(stroke_draw_color - 1);
-
     switch (std.math.order(width, height)) {
-        .lt => rect(x, y, width, height),
+        .lt => rect(stroke_color, fill_color, x, &.{ .y = .{ .unsafe = y }, .width = .{ .unsafe = width }, .height = .{ .unsafe = height } }),
         .eq => {
             const size: u31 = @intCast(width >> 1);
             const mid_x = x +| size;
@@ -211,17 +251,19 @@ pub fn oval(x: i32, y: i32, width: u32, height: u32) callconv(.C) void {
             var cur_y: u31 = size;
             var err: i32 = size >> 1;
             while (cur_x <= cur_y) {
-                hline(mid_x -| cur_y, mid_y -| cur_x, cur_y << 1);
-                hline(mid_x -| cur_y, mid_y +| cur_x, cur_y << 1);
-                if (stroke_palette_index) |palette_index| {
-                    clip_draw_palette(mid_x -| cur_x, mid_y -| cur_y, palette_index);
-                    clip_draw_palette(mid_x +| cur_x, mid_y -| cur_y, palette_index);
-                    clip_draw_palette(mid_x -| cur_y, mid_y -| cur_x, palette_index);
-                    clip_draw_palette(mid_x +| cur_y, mid_y -| cur_x, palette_index);
-                    clip_draw_palette(mid_x -| cur_y, mid_y +| cur_x, palette_index);
-                    clip_draw_palette(mid_x +| cur_y, mid_y +| cur_x, palette_index);
-                    clip_draw_palette(mid_x -| cur_x, mid_y +| cur_y, palette_index);
-                    clip_draw_palette(mid_x +| cur_x, mid_y +| cur_y, palette_index);
+                if (fill_color.unwrap()) |c| {
+                    hline(c, mid_x -| cur_y, mid_y -| cur_x, cur_y << 1);
+                    hline(c, mid_x -| cur_y, mid_y +| cur_x, cur_y << 1);
+                }
+                if (stroke_color != .none) {
+                    clip_draw(mid_x -| cur_x, mid_y -| cur_y, stroke_color.unwrap());
+                    clip_draw(mid_x +| cur_x, mid_y -| cur_y, stroke_color.unwrap());
+                    clip_draw(mid_x -| cur_y, mid_y -| cur_x, stroke_color.unwrap());
+                    clip_draw(mid_x +| cur_y, mid_y -| cur_x, stroke_color.unwrap());
+                    clip_draw(mid_x -| cur_y, mid_y +| cur_x, stroke_color.unwrap());
+                    clip_draw(mid_x +| cur_y, mid_y +| cur_x, stroke_color.unwrap());
+                    clip_draw(mid_x -| cur_x, mid_y +| cur_y, stroke_color.unwrap());
+                    clip_draw(mid_x +| cur_x, mid_y +| cur_y, stroke_color.unwrap());
                 }
                 cur_x += 1;
                 err += cur_x;
@@ -231,70 +273,70 @@ pub fn oval(x: i32, y: i32, width: u32, height: u32) callconv(.C) void {
                     cur_y -= 1;
 
                     if (cur_x <= cur_y) {
-                        hline(mid_x -| cur_x, mid_y -| cur_y, cur_x << 1);
-                        hline(mid_x -| cur_x, mid_y +| cur_y, cur_x << 1);
+                        if (fill_color.unwrap()) |c| {
+                            hline(c, mid_x -| cur_x, mid_y -| cur_y, cur_x << 1);
+                            hline(c, mid_x -| cur_x, mid_y +| cur_y, cur_x << 1);
+                        }
                     }
                 }
             }
         },
-        .gt => rect(x, y, width, height),
+        .gt => rect(stroke_color, fill_color, x, &.{ .y = .{ .unsafe = y }, .width = .{ .unsafe = width }, .height = .{ .unsafe = height } }),
     }
 }
 
-pub fn rect(x: i32, y: i32, width: u32, height: u32) callconv(.C) void {
-    if (width == 0 or height == 0 or x >= SCREEN_SIZE or y >= SCREEN_SIZE) return;
+pub fn rect(stroke_color: w4.OptionalDisplayColor, fill_color: w4.OptionalDisplayColor, x: i32, rest: *const extern struct { y: User(i32), width: User(u32), height: User(u32) }) callconv(.C) void {
+    const y = rest.y.load();
+    const width = rest.width.load();
+    const height = rest.height.load();
+
+    if (stroke_color == .none and fill_color == .none) return;
+    if (width == 0 or height == 0 or x >= w4.screen_width or y >= w4.screen_height) return;
     const end_x = x +| @min(width, std.math.maxInt(i32));
     const end_y = y +| @min(height, std.math.maxInt(i32));
     if (end_x < 0 or end_y < 0) return;
 
-    const draw_colors = DRAW_COLORS.*;
-    const fill_draw_color: u4 = @truncate(draw_colors >> 0);
-    const stroke_draw_color: u4 = @truncate(draw_colors >> 4);
-    if (fill_draw_color == 0 and stroke_draw_color == 0) return;
-    const fill_palette_index: ?u2 = if (fill_draw_color == 0) null else @truncate(fill_draw_color - 1);
-    const stroke_palette_index: ?u2 = if (stroke_draw_color == 0) fill_palette_index else @truncate(stroke_draw_color - 1);
-
-    if (stroke_palette_index) |palette_index| {
-        if (y >= 0 and y < SCREEN_SIZE) {
-            for (@max(x, 0)..@intCast(@min(end_x, SCREEN_SIZE))) |cur_x| {
-                draw_palette(@intCast(cur_x), @intCast(y), palette_index);
+    if (stroke_color != .none) {
+        if (y >= 0 and y < w4.screen_height) {
+            for (@max(x, 0)..@intCast(@min(end_x, w4.screen_width))) |cur_x| {
+                draw(@intCast(cur_x), @intCast(y), stroke_color.unwrap());
             }
         }
     }
     if (height > 2) {
-        for (@max(y + 1, 0)..@intCast(@min(end_y - 1, SCREEN_SIZE))) |cur_y| {
-            if (stroke_palette_index) |palette_index| {
-                if (x >= 0 and x < SCREEN_SIZE) {
-                    draw_palette(@intCast(x), @intCast(cur_y), palette_index);
-                }
+        for (@max(y + 1, 0)..@intCast(@min(end_y - 1, w4.screen_height))) |cur_y| {
+            if (x >= 0 and x < w4.screen_width) {
+                draw(@intCast(x), @intCast(cur_y), stroke_color.unwrap());
             }
-            if (fill_palette_index) |palette_index| {
+            if (fill_color != .none) {
                 if (width > 2) {
-                    for (@max(x + 1, 0)..@intCast(@min(end_x - 1, SCREEN_SIZE))) |cur_x| {
-                        draw_palette(@intCast(cur_x), @intCast(cur_y), palette_index);
+                    for (@max(x + 1, 0)..@intCast(@min(end_x - 1, w4.screen_width))) |cur_x| {
+                        draw(@intCast(cur_x), @intCast(cur_y), fill_color.unwrap());
                     }
                 }
             }
-            if (stroke_palette_index) |palette_index| {
-                if (width > 1 and end_x - 1 >= 0 and end_x - 1 < SCREEN_SIZE) {
-                    draw_palette(@intCast(end_x - 1), @intCast(cur_y), palette_index);
-                }
+            if (width > 1 and end_x - 1 >= 0 and end_x - 1 < w4.screen_width) {
+                draw(@intCast(end_x - 1), @intCast(cur_y), stroke_color.unwrap());
             }
         }
     }
-    if (stroke_palette_index) |palette_index| {
-        if (height > 1 and end_y - 1 >= 0 and end_y - 1 < SCREEN_SIZE) {
-            for (@max(x, 0)..@intCast(@min(end_x, SCREEN_SIZE))) |cur_x| {
-                draw_palette(@intCast(cur_x), @intCast(end_y - 1), palette_index);
+    if (stroke_color != .none) {
+        if (height > 1 and end_y - 1 >= 0 and end_y - 1 < w4.screen_height) {
+            for (@max(x, 0)..@intCast(@min(end_x, w4.screen_width))) |cur_x| {
+                draw(@intCast(cur_x), @intCast(end_y - 1), stroke_color.unwrap());
             }
         }
     }
 }
 
-pub fn text(str: [*]const User(u8), len: usize, x: i32, y: i32) callconv(.C) void {
+pub fn text(text_color: w4.DisplayColor, background_color: w4.OptionalDisplayColor, str_ptr: [*]const User(u8), rest: *const extern struct { str_len: User(usize), x: User(i32), y: User(i32) }) callconv(.C) void {
+    const str = str_ptr[0..rest.str_len.load()];
+    const x = rest.x.load();
+    const y = rest.y.load();
+
     var cur_x = x;
     var cur_y = y;
-    for (str[0..len]) |*byte| switch (byte.load()) {
+    for (str) |*byte| switch (byte.load()) {
         else => cur_x +|= 8,
         '\n' => {
             cur_x = x;
@@ -302,41 +344,33 @@ pub fn text(str: [*]const User(u8), len: usize, x: i32, y: i32) callconv(.C) voi
         },
         ' '...0xFF => |char| {
             const glyph = &font[char - ' '];
-            blit_unsafe(glyph, cur_x, cur_y, 8, 8, BLIT_1BPP);
+            blit_unsafe(&.{ text_color, background_color.unwrap() }, glyph, cur_x, cur_y, 8, 8, .{ .bits_per_pixel = .one });
             cur_x +|= 8;
         },
     };
 }
 
-pub fn vline(x: i32, y: i32, len: u32) callconv(.C) void {
-    if (len == 0 or x < 0 or x >= SCREEN_SIZE or y >= SCREEN_SIZE) return;
+pub fn vline(color: w4.DisplayColor, x: i32, y: i32, len: u32) callconv(.C) void {
+    if (len == 0 or x < 0 or x >= w4.screen_width or y >= w4.screen_height) return;
     const end_y = y +| @min(len, std.math.maxInt(i32));
     if (end_y < 0) return;
 
-    const draw_color: u4 = @truncate(DRAW_COLORS.* >> 0);
-    if (draw_color == 0) return;
-    const palette_index: u2 = @truncate(draw_color - 1);
-
-    for (@max(y, 0)..@intCast(@min(end_y, SCREEN_SIZE))) |cur_y| {
-        draw_palette(@intCast(x), @intCast(cur_y), palette_index);
+    for (@max(y, 0)..@intCast(@min(end_y, w4.screen_height))) |cur_y| {
+        draw(@intCast(x), @intCast(cur_y), color);
     }
 }
 
-pub fn hline(x: i32, y: i32, len: u32) callconv(.C) void {
-    if (len == 0 or y < 0 or y >= SCREEN_SIZE or x >= SCREEN_SIZE) return;
+pub fn hline(color: w4.DisplayColor, x: i32, y: i32, len: u32) callconv(.C) void {
+    if (len == 0 or y < 0 or y >= w4.screen_width or x >= w4.screen_height) return;
     const end_x = x +| @min(len, std.math.maxInt(i32));
     if (end_x < 0) return;
 
-    const draw_color: u4 = @truncate(DRAW_COLORS.* >> 0);
-    if (draw_color == 0) return;
-    const palette_index: u2 = @truncate(draw_color - 1);
-
-    for (@max(x, 0)..@intCast(@min(end_x, SCREEN_SIZE))) |cur_x| {
-        draw_palette(@intCast(cur_x), @intCast(y), palette_index);
+    for (@max(x, 0)..@intCast(@min(end_x, w4.screen_width))) |cur_x| {
+        draw(@intCast(cur_x), @intCast(y), color);
     }
 }
 
-pub fn tone(frequency: u32, duration: u32, volume: u32, flags: u32) callconv(.C) void {
+pub fn tone(frequency: u32, duration: u32, volume: u32, flags: w4.ToneFlags) callconv(.C) void {
     const start_frequency: u16 = @truncate(frequency >> 0);
     const end_frequency = switch (@as(u16, @truncate(frequency >> 16))) {
         0 => start_frequency,
@@ -352,7 +386,6 @@ pub fn tone(frequency: u32, duration: u32, volume: u32, flags: u32) callconv(.C)
         0 => 100,
         else => |attack_volume| attack_volume,
     };
-    const channel: enum { pulse1, pulse2, triangle, noise } = @enumFromInt(@as(u2, @truncate(flags >> 0)));
 
     var state: audio.Channel = .{
         .duty = 0,
@@ -398,10 +431,9 @@ pub fn tone(frequency: u32, duration: u32, volume: u32, flags: u32) callconv(.C)
         state.release_volume_step = @divTrunc(@as(i32, 0) - state.sustain_volume, state.release_duration);
     }
 
-    switch (channel) {
+    switch (flags.channel) {
         .pulse1, .pulse2 => {
-            const mode: enum { @"1/8", @"1/4", @"1/2", @"3/4" } = @enumFromInt(@as(u2, @truncate(flags >> 2)));
-            state.duty = switch (mode) {
+            state.duty = switch (flags.duty_cycle) {
                 .@"1/8" => (1 << 32) / 8,
                 .@"1/4" => (1 << 32) / 4,
                 .@"1/2" => (1 << 32) / 2,
@@ -416,7 +448,19 @@ pub fn tone(frequency: u32, duration: u32, volume: u32, flags: u32) callconv(.C)
         },
     }
 
-    audio.set_channel(@intFromEnum(channel), state);
+    audio.set_channel(@intFromEnum(flags.channel), state);
+}
+
+pub fn read_flash(offset: u32, dst_ptr: [*]User(u8), dst_len: usize) callconv(.C) void {
+    const dst = dst_ptr[0..dst_len];
+
+    _ = offset;
+    _ = dst;
+}
+
+pub fn write_flash_page(page: u16, src: *const [w4.flash_page_size]User(u8)) void {
+    _ = page;
+    _ = src;
 }
 
 pub fn trace(str: [*]const User(u8), len: usize) callconv(.C) void {
@@ -442,9 +486,10 @@ fn call(func: *const fn () callconv(.C) void) void {
     );
 }
 
-fn blit_unsafe(sprite: [*]const u8, x: i32, y: i32, width: u32, height: u32, flags: u32) void {
-    switch (flags) {
-        BLIT_1BPP => for (0..height) |sprite_y| {
+fn blit_unsafe(colors: []const ?w4.DisplayColor, sprite: [*]const u8, x: i32, y: i32, width: u32, height: u32, flags: w4.BlitFlags) void {
+    if (flags.flip_x or flags.flip_y or flags.rotate) return;
+    switch (flags.bits_per_pixel) {
+        .one => for (0..height) |sprite_y| {
             for (0..width) |sprite_x| {
                 const sprite_index = sprite_x + width * sprite_y;
                 const draw_color_index: u1 = @truncate(sprite[sprite_index >> 3] >>
@@ -452,11 +497,11 @@ fn blit_unsafe(sprite: [*]const u8, x: i32, y: i32, width: u32, height: u32, fla
                 clip_draw(
                     x +| @min(sprite_x, std.math.maxInt(i32)),
                     y +| @min(sprite_y, std.math.maxInt(i32)),
-                    draw_color_index,
+                    colors[draw_color_index],
                 );
             }
         },
-        BLIT_2BPP => for (0..height) |sprite_y| {
+        .two => for (0..height) |sprite_y| {
             for (0..width) |sprite_x| {
                 const sprite_index = sprite_x + width * sprite_y;
                 const draw_color_index: u2 = @truncate(sprite[sprite_index >> 2] >>
@@ -464,37 +509,21 @@ fn blit_unsafe(sprite: [*]const u8, x: i32, y: i32, width: u32, height: u32, fla
                 clip_draw(
                     x +| @min(sprite_x, std.math.maxInt(i32)),
                     y +| @min(sprite_y, std.math.maxInt(i32)),
-                    draw_color_index,
+                    colors[draw_color_index],
                 );
             }
         },
-        else => {},
     }
 }
 
-inline fn clip_draw(x: i32, y: i32, draw_color_index: u2) void {
-    if (x < 0 or x >= SCREEN_SIZE or y < 0 or y >= SCREEN_SIZE) return;
-    draw(@intCast(x), @intCast(y), draw_color_index);
+inline fn clip_draw(x: i32, y: i32, color: ?w4.DisplayColor) void {
+    if (x < 0 or x >= w4.screen_width or y < 0 or y >= w4.screen_height) return;
+    draw(@intCast(x), @intCast(y), color);
 }
 
-inline fn clip_draw_palette(x: i32, y: i32, palette_index: u2) void {
-    if (x < 0 or x >= SCREEN_SIZE or y < 0 or y >= SCREEN_SIZE) return;
-    draw_palette(@intCast(x), @intCast(y), palette_index);
-}
-
-inline fn draw(x: u8, y: u8, draw_color_index: u2) void {
-    const draw_color: u4 = @truncate(DRAW_COLORS.* >> (@as(u4, draw_color_index) << 2));
-    if (draw_color == 0) return;
-    const palette_index: u2 = @truncate(draw_color - 1);
-    draw_palette(x, y, palette_index);
-}
-
-inline fn draw_palette(x: u8, y: u8, palette_index: u2) void {
-    std.debug.assert(x < SCREEN_SIZE and y < SCREEN_SIZE);
-    const buffer_index = x + SCREEN_SIZE * y;
-    const shift = @as(u3, @as(u2, @truncate(buffer_index))) << 1;
-    const byte = &FRAMEBUFFER[buffer_index >> 2];
-    byte.* = (byte.* & ~(@as(u8, 0b11) << shift)) | @as(u8, palette_index) << shift;
+inline fn draw(x: u8, y: u8, color: ?w4.DisplayColor) void {
+    std.debug.assert(x < w4.screen_width and y < w4.screen_height);
+    w4.framebuffer[x + w4.screen_width * y] = color orelse return;
 }
 
 fn format_user_string(bytes: []const User(u8), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
@@ -543,46 +572,7 @@ const libcart = struct {
     extern fn start() void;
     extern fn update() void;
     extern fn __return_thunk__() noreturn;
-
-    comptime {
-        if (!options.have_cart) _ = @import("wasm4.zig").__return_thunk__;
-    }
 };
-
-pub const SCREEN_SIZE: u32 = 160;
-
-const PALETTE: *[4]u32 = @ptrFromInt(0x20000004);
-const DRAW_COLORS: *u16 = @ptrFromInt(0x20000014);
-const GAMEPAD1: *u8 = @ptrFromInt(0x20000016);
-const GAMEPAD2: *u8 = @ptrFromInt(0x20000017);
-const GAMEPAD3: *u8 = @ptrFromInt(0x20000018);
-const GAMEPAD4: *u8 = @ptrFromInt(0x20000019);
-const MOUSE_X: *i16 = @ptrFromInt(0x2000001a);
-const MOUSE_Y: *i16 = @ptrFromInt(0x2000001c);
-const MOUSE_BUTTONS: *u8 = @ptrFromInt(0x2000001e);
-const SYSTEM_FLAGS: *u8 = @ptrFromInt(0x2000001f);
-const NETPLAY: *u8 = @ptrFromInt(0x20000020);
-const FRAMEBUFFER: *[6400]u8 = @ptrFromInt(0x200000A0);
-
-const BUTTON_1: u8 = 1;
-const BUTTON_2: u8 = 2;
-const BUTTON_LEFT: u8 = 16;
-const BUTTON_RIGHT: u8 = 32;
-const BUTTON_UP: u8 = 64;
-const BUTTON_DOWN: u8 = 128;
-
-const MOUSE_LEFT: u8 = 1;
-const MOUSE_RIGHT: u8 = 2;
-const MOUSE_MIDDLE: u8 = 4;
-
-const SYSTEM_PRESERVE_FRAMEBUFFER: u8 = 1;
-const SYSTEM_HIDE_GAMEPAD_OVERLAY: u8 = 2;
-
-pub const BLIT_2BPP: u32 = 1;
-pub const BLIT_1BPP: u32 = 0;
-pub const BLIT_FLIP_X: u32 = 2;
-pub const BLIT_FLIP_Y: u32 = 4;
-pub const BLIT_ROTATE: u32 = 8;
 
 const audio = @import("audio.zig");
 const lcd = @import("lcd.zig");

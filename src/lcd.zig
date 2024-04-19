@@ -130,7 +130,7 @@ pub fn init(bpp: Bpp) void {
     if (dma.enable) {
         Port.TFT_CS.write(.low);
         timer.delay(1);
-        dma.init_lcd(bpp);
+        dma.init_lcd(&fb, bpp);
     }
 }
 

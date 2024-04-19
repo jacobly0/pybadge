@@ -1,6 +1,6 @@
 pub const enable = true;
 
-pub fn init_lcd(bpp: lcd.Bpp) void {
+pub fn init_lcd(fb: *const lcd.FrameBuffer, bpp: lcd.Bpp) void {
     @setCold(true);
 
     init();
@@ -49,7 +49,7 @@ pub fn init_lcd(bpp: lcd.Bpp) void {
         inline else => |tag| {
             const len = @sizeOf(std.meta.FieldType(lcd.FrameBuffer, tag));
             desc[DESC.LCD].BTCNT.write(.{ .BTCNT = len });
-            desc[DESC.LCD].SRCADDR.write(.{ .SRCADDR = @intFromPtr(&@field(lcd.fb, @tagName(tag))) + len });
+            desc[DESC.LCD].SRCADDR.write(.{ .SRCADDR = @intFromPtr(&@field(fb, @tagName(tag))) + len });
         },
     }
     desc[DESC.LCD].DSTADDR.write(.{ .CHKINIT = @intFromPtr(&io.SERCOM4.SPIM.DATA) });

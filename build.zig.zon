@@ -20,8 +20,8 @@
             .hash = "122074ce2f776dc9dc4a0d2588a5d76b97212a2c311ef8125d4aadffa4b84e5b8b3e",
         },
         .ws = .{
-            .url = "git+https://github.com/karlseguin/websocket.zig.git#1f2c4a56c642dab52fe12cdda1bd3f56865d1f86",
-            .hash = "1220ce168e550f8904364acd0a72f5cafd40caa08a50ba83aac50b97ba700d7bcf20",
+            .url = "git+https://github.com/karlseguin/websocket.zig.git#d8cfa9a1a644366048d9d54b2dddf4b5e984e43b",
+            .hash = "1220577e9b5cc1fb445f5779c2e71e076c35a9ede1bef525a95a21f0884fca83c304",
         },
     },
 }

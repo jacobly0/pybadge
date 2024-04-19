@@ -15,9 +15,8 @@ fn read_stored_number() u64 {
 
 fn write_stored_number(number: u64) void {
     var page: [wasm4.flash_page_size]u8 = undefined;
-    // @as(*u64, @alignCast(@ptrCast(page[0..8]))).* = number;
-    std.mem.bytesAsSlice(u64, &page)[0] = number;
-    wasm4.write_flash_page(0, page);
+    std.mem.writeInt(u64, page[0..8], number, .little);
+    wasm4.write_flash_page(0, &page);
 }
 
 export fn update() void {
